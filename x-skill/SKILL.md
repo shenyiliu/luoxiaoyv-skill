@@ -14,6 +14,100 @@ description: >
 
 Full-stack X (Twitter) account operations: diagnostics, content, engagement, growth.
 
+## ⚙️ Prerequisites Check（首次使用必读）
+
+**每次激活 skill 时，先运行以下检查。缺什么就帮用户装什么。**
+
+```bash
+# 一键检查所有依赖
+echo "=== Chrome CDP ===" && curl -s http://127.0.0.1:18800/json/version | python3 -c "import sys,json; print('✅ Chrome', json.load(sys.stdin).get('Browser',''))" 2>/dev/null || echo "❌ Chrome not running"
+echo "=== Xvfb ===" && ls /tmp/.X1-lock &>/dev/null && echo "✅ Xvfb :1 running" || echo "❌ Xvfb not running"
+echo "=== x-reader ===" && which x-reader &>/dev/null && echo "✅ x-reader installed" || echo "❌ x-reader not installed"
+echo "=== websocket-client ===" && python3 -c "import websocket; print('✅ websocket-client', websocket.__version__)" 2>/dev/null || echo "❌ websocket-client not installed"
+```
+
+### 安装缺失依赖
+
+**x-reader**（抓推文内容，必须）：
+```bash
+pip install "git+https://github.com/runesleo/x-reader.git" -q
+```
+
+**websocket-client**（Chrome CDP 操作，必须）：
+```bash
+pip install websocket-client -q
+```
+
+**Xvfb**（虚拟显示器，云服务器必须，本地 Mac/Windows 不需要）：
+```bash
+# Ubuntu/Debian
+apt-get install -y xvfb x11-utils
+Xvfb :1 -screen 0 1920x1080x24 &
+export DISPLAY=:1
+
+# CentOS/RHEL
+yum install -y xorg-x11-server-Xvfb
+Xvfb :1 -screen 0 1920x1080x24 &
+export DISPLAY=:1
+```
+
+**Google Chrome**（云服务器必须，本地已有可跳过）：
+```bash
+# Ubuntu/Debian
+wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+apt-get install -y ./google-chrome-stable_current_amd64.deb
+
+# CentOS/RHEL
+wget https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm
+yum install -y ./google-chrome-stable_current_x86_64.rpm
+```
+
+**KasmVNC**（可选，远程桌面查看 Chrome，云服务器推荐）：
+```bash
+# Ubuntu 22.04
+wget https://github.com/kasmtech/KasmVNC/releases/download/v1.3.3/kasmvncserver_jammy_1.3.3_amd64.deb
+apt-get install -y ./kasmvncserver_jammy_1.3.3_amd64.deb
+kasmvncpasswd  # 设置密码
+vncserver :1 -geometry 1920x1080
+# 访问 https://<your-ip>:8444
+```
+
+### 启动 Chrome（如未运行）
+```bash
+DISPLAY=:1 nohup google-chrome-stable \
+  --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage \
+  --remote-debugging-port=18800 --remote-allow-origins='*' \
+  --user-data-dir=$HOME/.chrome-x-ops \
+  --no-first-run --start-maximized https://x.com \
+  > /tmp/chrome.log 2>&1 &
+sleep 5 && curl -s http://127.0.0.1:18800/json/version | python3 -c "import sys,json; print('✅', json.load(sys.stdin).get('Browser',''))"
+```
+
+### X 账号登录（Cookie 注入）
+X 在新环境会触发安全验证，用 Cookie 注入绕过：
+1. 本地浏览器打开 x.com 登录
+2. DevTools → Application → Cookies → 复制 `auth_token`、`ct0`、`twid`、`kdt`
+3. 用 Python CDP 注入：
+```python
+import json, urllib.request, websocket
+tabs = json.loads(urllib.request.urlopen('http://127.0.0.1:18800/json').read())
+xtab = next(t for t in tabs if 'x.com' in t.get('url','') and t.get('type')=='page')
+ws = websocket.create_connection(xtab['webSocketDebuggerUrl'])
+for i, (name, value) in enumerate([
+    ('auth_token', 'YOUR_AUTH_TOKEN'),
+    ('ct0', 'YOUR_CT0'),
+    ('twid', 'YOUR_TWID'),
+    ('kdt', 'YOUR_KDT'),
+]):
+    ws.send(json.dumps({'id': i+1, 'method': 'Network.setCookie',
+        'params': {'name': name, 'value': value, 'domain': '.x.com', 'path': '/', 'secure': True, 'httpOnly': True}}))
+    ws.recv()
+ws.send(json.dumps({'id': 99, 'method': 'Page.navigate', 'params': {'url': 'https://x.com/home'}}))
+ws.recv(); ws.close(); print('✅ Cookies injected')
+```
+
+---
+
 ## User Context
 
 - Account: @YOUR_HANDLE (read from AGENTS.md)

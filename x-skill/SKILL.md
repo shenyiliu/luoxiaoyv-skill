@@ -5,8 +5,7 @@ description: >
   posting tweets, replying to tweets, running X account, growing X followers, drafting posts,
   engagement strategy, X运营, 发推, 发帖, 推特, 推文, or any X/Twitter-related task.
   Covers: account diagnostics, tweet drafting, content strategy, daily engagement (reply workflow),
-  AI news research, browser-based posting via Chrome CDP (draft or publish), target account pool,
-  reply style guide, and automated posting workflow.
+  AI news research, target account pool, reply style guide, and content planning workflow.
   NOT for: non-X social media platforms.
 ---
 
@@ -23,7 +22,6 @@ Full-stack X (Twitter) account operations: diagnostics, content, engagement, gro
 echo "=== Chrome CDP ===" && curl -s http://127.0.0.1:18800/json/version | python3 -c "import sys,json; print('✅ Chrome', json.load(sys.stdin).get('Browser',''))" 2>/dev/null || echo "❌ Chrome not running"
 echo "=== Xvfb ===" && ls /tmp/.X1-lock &>/dev/null && echo "✅ Xvfb :1 running" || echo "❌ Xvfb not running"
 echo "=== x-reader ===" && which x-reader &>/dev/null && echo "✅ x-reader installed" || echo "❌ x-reader not installed"
-echo "=== websocket-client ===" && python3 -c "import websocket; print('✅ websocket-client', websocket.__version__)" 2>/dev/null || echo "❌ websocket-client not installed"
 ```
 
 ### 安装缺失依赖
@@ -31,11 +29,6 @@ echo "=== websocket-client ===" && python3 -c "import websocket; print('✅ webs
 **x-reader**（抓推文内容，必须）：
 ```bash
 pip install "git+https://github.com/runesleo/x-reader.git" -q
-```
-
-**websocket-client**（Chrome CDP 操作，必须）：
-```bash
-pip install websocket-client -q
 ```
 
 **Xvfb**（虚拟显示器，云服务器必须，本地 Mac/Windows 不需要）：
@@ -81,29 +74,6 @@ DISPLAY=:1 nohup google-chrome-stable \
   --no-first-run --start-maximized https://x.com \
   > /tmp/chrome.log 2>&1 &
 sleep 5 && curl -s http://127.0.0.1:18800/json/version | python3 -c "import sys,json; print('✅', json.load(sys.stdin).get('Browser',''))"
-```
-
-### X 账号登录（Cookie 注入）
-X 在新环境会触发安全验证，用 Cookie 注入绕过：
-1. 本地浏览器打开 x.com 登录
-2. DevTools → Application → Cookies → 复制 `auth_token`、`ct0`、`twid`、`kdt`
-3. 用 Python CDP 注入：
-```python
-import json, urllib.request, websocket
-tabs = json.loads(urllib.request.urlopen('http://127.0.0.1:18800/json').read())
-xtab = next(t for t in tabs if 'x.com' in t.get('url','') and t.get('type')=='page')
-ws = websocket.create_connection(xtab['webSocketDebuggerUrl'])
-for i, (name, value) in enumerate([
-    ('auth_token', 'YOUR_AUTH_TOKEN'),
-    ('ct0', 'YOUR_CT0'),
-    ('twid', 'YOUR_TWID'),
-    ('kdt', 'YOUR_KDT'),
-]):
-    ws.send(json.dumps({'id': i+1, 'method': 'Network.setCookie',
-        'params': {'name': name, 'value': value, 'domain': '.x.com', 'path': '/', 'secure': True, 'httpOnly': True}}))
-    ws.recv()
-ws.send(json.dumps({'id': 99, 'method': 'Page.navigate', 'params': {'url': 'https://x.com/home'}}))
-ws.recv(); ws.close(); print('✅ Cookies injected')
 ```
 
 ---
@@ -375,67 +345,11 @@ x-reader https://x.com/YOUR_HANDLE
 
 ---
 
-## 发帖工具（Chrome CDP 浏览器自动化）
-
-**所有发推、回复、存草稿操作必须使用原生 Chrome CDP，不用 API。**
-
-CDP endpoint: `http://127.0.0.1:18800`
-用 Python websocket 直接操控 Chrome，步骤：
-1. `GET http://127.0.0.1:18800/json` 找到 x.com tab
-2. 连接 tab 的 `webSocketDebuggerUrl`
-3. 用 `Page.navigate` / `Runtime.evaluate` / `Page.captureScreenshot` 操作
-
-### Chrome 状态检查 / 启动
-```bash
-# 检查是否在跑
-curl -s http://127.0.0.1:18800/json/version
-
-# 启动（如果没跑）
-DISPLAY=:1 nohup google-chrome-stable \
-  --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage \
-  --remote-debugging-port=18800 --remote-allow-origins='*' \
-  --user-data-dir=/root/.openclaw/browser/openclaw/user-data \
-  --no-first-run --start-maximized https://x.com \
-  > /tmp/chrome.log 2>&1 &
-sleep 5
-```
-
-### 发原创推文（存草稿）
-```bash
-python3 scripts/post_to_x.py --text "推文内容"
-```
-
-### 发原创推文（直接发布）
-```bash
-python3 scripts/post_to_x.py --post --text "推文内容"
-```
-
-### 回复某条推文（直接发布）
-用 Python CDP 脚本：
-1. `Page.navigate` 到目标推文 URL
-2. 等页面加载，找 `[data-testid="reply"]` 按钮点击
-3. 等回复框出现，用 `execCommand('insertText')` 输入内容
-4. 找 `[data-testid="tweetButton"]`（非 disabled）点击发布
-5. 截图确认
-
-### 截图确认
-每次操作后用 `Page.captureScreenshot` 截图，保存到 `your-workspace/` 发给用户确认。
-
-### 流程说明
-- 存草稿 = SideNav_NewTweet_Button → 填内容 → app-bar-close → 点"保存"
-- 直接发布 = 同上，最后点 tweetButton/tweetButtonInline
-- 回复 = 打开推文页 → 点 reply 按钮 → 填内容 → 点 tweetButton
-
----
-
 ## 重要约束
 
 - ❌ 不要用 "me" 作为 Telegram target，必须用 AGENTS.md 中配置的 TELEGRAM_CHAT_ID
 - ❌ 用 x-reader 抓推文，不用 X API / web_fetch
-- ❌ 发帖/回复必须用原生 Chrome CDP，不用其他方式
-- ✅ 发推前先给用户看中文草稿确认，确认后操作 Chrome 存草稿或直接发布
-- ✅ 互动回复：用 Chrome 打开目标推文页，找到回复框直接发布
-- ✅ 每次操作后截图发给用户确认
+- ✅ 发推前先给用户看中文草稿确认，用户确认后再去 X 发布
 - ✅ 互动回复必须同时提供英文版 + 中文版
 - ✅ x-reader 不可用时，基于已知内容手动起草，不要空手而归
 - ✅ 每日任务必须包含原创推文草稿
